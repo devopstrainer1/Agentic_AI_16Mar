@@ -32,8 +32,12 @@ if st.button("Search Resume") and query:
     with st.spinner("Searching..."):
         results = run_self_query(query)
         if results:
-            for i, res in enumerate(results, 1):
-                st.markdown(f"**Result {i}:**")
-                st.write(res.page_content.strip())
+            # If results is a string, just display it
+            if isinstance(results, str):
+                st.write(results.strip())
+            else:
+                for i, res in enumerate(results, 1):
+                    st.markdown(f"**Result {i}:**")
+                    st.write(res.page_content.strip() if hasattr(res, 'page_content') else str(res).strip())
         else:
             st.warning("No relevant information found.")
