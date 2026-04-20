@@ -1,0 +1,56 @@
+import os
+from google.colab import userdata
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate
+
+# API key
+os.environ["GOOGLE_API_KEY"] = userdata.get("GOOGLE_API_KEY")
+
+# LangChain Model
+llm = ChatGoogleGenerativeAI(
+    model="gemini-flash-latest",
+    temperature=0.3
+)
+
+# Prompt Template
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "I am helpful health assistant, not a doctor."),
+    ("human", """
+Patient says: {user_input}
+
+Answer in simple language:
+1. Seriousness (Low / Medium / High)
+2. Possible causes (2-3 only)
+3. What to do next
+
+Rules:
+- Do NOT give diagnosis
+- Do NOT prescribe medicines
+- If serious → say seek immediate medical help
+- Add: "This is not medical advice"
+
+Also classify prompt type (instruction / role-based)
+""")
+])
+
+# Chain
+chain = prompt | llm
+
+# User input
+user_input = input("Describe your symptoms: ")
+
+# Basic safety pre-check
+danger_keywords = ["chest pain", "breathing difficulty", "unconscious", "heavy bleeding"]
+
+if any(word in user_input.lower() for word in danger_keywords):
+    print("This may be serious. Seek immediate medical help.\n")
+
+# Invoke chain
+response = chain.invoke({
+    "user_input": user_input
+})
+
+# Output
+print("\nThis is not medical advice just for reference and further to meet doctor:\n")
+print(response.content)
