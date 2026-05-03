@@ -1,5 +1,5 @@
 # financial bot designed using langcian, langgraph and groq
-# Install dependencies
+# Install dependencies 
 !pip -q install langgraph langchain langchain-groq
 
 # Imports
