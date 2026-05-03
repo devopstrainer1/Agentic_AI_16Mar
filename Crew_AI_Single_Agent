@@ -1,5 +1,5 @@
 
-# creating a resarch assistant
+# creating a resarch assistant using crew framework
 # installation core packages
 
 !pip install -q crewai crewai-tools litellm
