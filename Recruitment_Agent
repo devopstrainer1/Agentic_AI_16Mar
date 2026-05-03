@@ -1,4 +1,4 @@
-# step 1- install all required packages
+# step 1- install all required package
 # langchain - core framework
 # langchain-google-genai - integrate with gemini models
 # langchain community - document loaders, utilities
