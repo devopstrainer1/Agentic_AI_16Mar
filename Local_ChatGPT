@@ -1,0 +1,228 @@
+import os, uuid, time
+import pandas as pd
+import streamlit as st
+from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+from sentence_transformers import SentenceTransformer
+from pinecone import Pinecone, ServerlessSpec
+from phi.agent import Agent
+from phi.tools import tool
+from phi.model.google import Gemini
+
+# Load environment variables
+load_dotenv()
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+
+
+## embedding model
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+model = Gemini(api_key=GOOGLE_API_KEY,id="gemini-2.5-flash",temperature=0.4)
+
+### pinecone setup
+
+pc = Pinecone(api_key=PINECONE_API_KEY)
+INDEX_NAME = "phi-pinecone-demo"
+
+if INDEX_NAME not in pc.list_indexes().names():
+    pc.create_index(
+        name=INDEX_NAME, 
+        dimension=384, 
+        metric="cosine", 
+        spec=ServerlessSpec(cloud="aws", region="us-east-1")
+    
+    )
+index = pc.Index(INDEX_NAME)
+
+
+### defne session state for monitoring data
+
+if "metrics" not in st.session_state:
+    st.session_state.metrics = {
+        "uploads": 0,
+        "queries": 0,
+        "errors": 0,
+        "latency": 0
+    }
+
+if "latest_response" not in st.session_state:
+    st.session_state.latest_response = None
+
+if "data_loaded" not in st.session_state:
+    st.session_state.data_loaded = False
+
+
+#### clean data
+
+def clean_data(df):
+    for col in df.columns:
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except:
+            df[col] = df[col].astype(str).str.replace("\n"," ")
+    return df
+
+### vector store tool
+
+def embed_store_fn(path):
+    start = time.time()
+
+    df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
+    df = clean_data(df)
+
+    text = df.to_csv(index=False)
+    chunks= [text[i:i+1000] for i in range(0, len(text), 1000)]
+
+    vectors=[]
+
+    for c in chunks:
+        emb = embedding_model.encode(c).tolist()
+        vectors.append((str(uuid.uuid4()), emb, {"text": c}))
+
+    index.upsert(vectors)
+
+    st.session_state.metrics["uploads"] += 1
+    st.session_state.metrics["latency"] = round(time.time() - start, 2)
+
+    return len(vectors)
+
+def search_fn(q):
+    start = time.time()
+
+    emb = embedding_model.encode(q).tolist()
+    res = index.query(vector=emb, top_k=3, include_metadata=True)
+
+    texts=[]
+
+    for m in getattr(res, "matches", []):
+      if m.metadata and "text" in m.metadata:
+        texts.append(m.metadata["text"])
+
+
+
+    st.session_state.metrics["queries"] += 1
+    st.session_state.metrics["latency"] = round(time.time() - start, 2)
+
+    return "\n".join(texts) if texts else "No relevant data found."
+
+## vector database tool stata
+
+def get_db_stats():
+    stats = index.describe_index_stats()
+    total = stats.get("total_vector_count", 0)
+    namespaces = stats.get("namespaces", {})
+
+    dim = 384
+    size_mb = (total * dim * 4) / (1024 * 1024)
+    return total, size_mb, namespaces
+
+### define agent and tools
+
+agent = Agent(
+    tools=[tool(search_fn)],
+    model=model,
+    instructions="""
+    You are a expert data analyst.
+
+    RULES:
+    - Use Numbers
+    - No vague text
+
+    FORMAT:
+    ## Answer
+    ## Evidence
+    """
+)
+
+
+### streamlit UI
+
+st.set_page_config(layout="wide")   
+st.title("Phi + Pinecone Demo")
+
+###sidebar
+
+st.sidebar.header("Vector Database Stats")
+
+vec, size, ns = get_db_stats()
+
+st.sidebar.metric("**Total Vectors", vec)
+st.sidebar.metric("**Total Size (MB)", f"{size:.2f}")
+
+if ns:
+    for k, v in ns.items():
+        st.sidebar.write(f"{k}:  {v.get('vector_count', 0)}")
+st.sidebar.header("Observability Metrics")
+
+m = st.session_state.metrics
+
+st.sidebar.metric("Uploads", m["uploads"])
+st.sidebar.metric("Queries", m["queries"])
+st.sidebar.metric("Errors", m["errors"])
+st.sidebar.metric("Latency (s)", m["latency"])  
+
+## file uploader
+
+file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
+
+if file and not st.session_state.data_loaded:
+    path=f"temp_{uuid.uuid4()}.{file.name.split('.')[-1]}"
+
+    with open(path, "wb") as f:
+       f.write(file.getbuffer())
+
+    df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
+    df = clean_data(df)
+
+    st.dataframe(df.head())
+
+    chunks = embed_store_fn(path)
+    st.success(f"File embedded and stored in Pinecone as {chunks} vectors!")
+    st.session_state.data_loaded = True
+
+    os.remove(path)
+
+### user input UI
+
+st.subheader("Ask a question about your data")
+
+with st.form("chat_form", clear_on_submit=True):
+    user_query = st.text_input("Enter your question here:")
+    submit = st.form_submit_button("Submit")
+
+if submit and user_query:
+
+    context = search_fn("dataset" + user_query)
+
+    if context == "N0_CONTEXT":
+        st.warning("No relevant data found in Pinecone. Please upload a dataset first.")
+    else:
+        resp = agent.run(f"""
+        Question: {user_query}
+        
+        Context={context}
+        """)
+
+        ouput = getattr(resp, "content", str(resp))
+
+        st.session_state.latest_response = (user_query, ouput)
+
+
+## display only latest
+
+if st.session_state.latest_response:
+    q, r = st.session_state.latest_response
+
+    st.markdown(f"#### {q}")
+
+    st.markdown(r)
+
+
+### footer
+
+st.markdown("----")
+
+st.caption("ChatGPT using internal data")
+
+
