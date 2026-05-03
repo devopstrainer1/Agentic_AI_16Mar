@@ -20,7 +20,7 @@ def simple_agent(prompt):
     return response.text
 
 # Try first prompt
-question = "Can you explain the difference between Agentic AI and AI Agents?"
+question = "Can you explain the difference between Agentic AI and AI Agents"
 answer = simple_agent(question)
 
 
