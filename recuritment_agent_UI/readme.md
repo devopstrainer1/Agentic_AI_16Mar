@@ -1,6 +1,6 @@
  create vitual environment in VSCode terminal by typing
 
-venv
+python -m venv venv
 source venv/bin/activate ( this will install virtual environment in python )
 
 # install python 3.11
