@@ -1,6 +1,6 @@
 # app.py
 
-# This is AI with CrewAI and Groq
+# This is AI with CrewAI and Groq ( financial advisor)
 
 import streamlit as st
 import os
