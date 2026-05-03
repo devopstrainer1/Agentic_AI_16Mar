@@ -117,7 +117,7 @@ if not resume_text:
 job_description = input("Enter Job Description:\n")
 
 # ============================================================
-# STEP 11: Run with LangSmith Trace
+# STEP 11: Run with LangSmith Trace ( optional )
 # ============================================================
 result = chain.invoke(
     {
